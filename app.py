@@ -22,6 +22,16 @@ PHOTO_PATHS = {
     "Isabel": "isabel.jpg",
 }
 
+selected_user = st.sidebar.selectbox("Choose a person", USERS)
+
+photo_file = PHOTO_PATHS.get(selected_user)
+try:
+    st.image(photo_file, width=220)
+except Exception:
+    st.warning(f"Photo not found: {photo_file}")
+
+}
+
 
 @st.cache_resource
 def get_supabase():
