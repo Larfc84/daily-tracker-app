@@ -1,11 +1,10 @@
-import sqlite3
-from datetime import date, datetime, timedelta, time
+from datetime import date, timedelta, time
 
 import pandas as pd
 import streamlit as st
+from supabase import create_client
 
 
-DB_NAME = "daily_tracker.db"
 USERS = ["Laurence", "Isabel"]
 CATEGORIES = [
     "Work",
@@ -19,117 +18,79 @@ CATEGORIES = [
 ]
 
 
-def get_connection():
-    connection = sqlite3.connect(DB_NAME, check_same_thread=False)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def create_table():
-    with get_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS entries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                person TEXT NOT NULL,
-                entry_date TEXT NOT NULL,
-                entry_time TEXT NOT NULL,
-                activity TEXT NOT NULL,
-                category TEXT NOT NULL,
-                notes TEXT,
-                completed INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
+@st.cache_resource
+def get_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 
 def add_entry(person, entry_date, entry_time, activity, category, notes):
-    with get_connection() as connection:
-        connection.execute(
-            """
-            INSERT INTO entries (
-                person,
-                entry_date,
-                entry_time,
-                activity,
-                category,
-                notes,
-                completed,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-            """,
-            (
-                person,
-                entry_date.isoformat(),
-                entry_time.strftime("%H:%M"),
-                activity.strip(),
-                category,
-                notes.strip(),
-                datetime.now().isoformat(timespec="seconds"),
-            ),
-        )
+    supabase = get_supabase()
+    supabase.table("entries").insert(
+        {
+            "person": person,
+            "entry_date": entry_date.isoformat(),
+            "entry_time": entry_time.strftime("%H:%M"),
+            "activity": activity.strip(),
+            "category": category,
+            "notes": notes.strip(),
+            "completed": False,
+        }
+    ).execute()
 
 
 def mark_entry_complete(entry_id):
-    with get_connection() as connection:
-        connection.execute(
-            "UPDATE entries SET completed = 1 WHERE id = ?",
-            (entry_id,),
-        )
+    supabase = get_supabase()
+    supabase.table("entries").update({"completed": True}).eq("id", entry_id).execute()
 
 
 def get_entries_for_day(selected_date, person=None):
-    query = """
-        SELECT *
-        FROM entries
-        WHERE entry_date = ?
-    """
-    params = [selected_date.isoformat()]
+    supabase = get_supabase()
+    query = supabase.table("entries").select("*").eq("entry_date", selected_date.isoformat())
 
     if person:
-        query += " AND person = ?"
-        params.append(person)
+        query = query.eq("person", person)
 
-    query += " ORDER BY entry_time ASC, id ASC"
-
-    with get_connection() as connection:
-        return connection.execute(query, params).fetchall()
+    response = query.order("entry_time").execute()
+    return response.data
 
 
 def get_weekly_summary(start_date, end_date):
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT
-                person,
-                COUNT(*) AS total_entries,
-                SUM(completed) AS completed_entries
-            FROM entries
-            WHERE entry_date BETWEEN ? AND ?
-            GROUP BY person
-            ORDER BY person
-            """,
-            (start_date.isoformat(), end_date.isoformat()),
-        ).fetchall()
+    supabase = get_supabase()
+    response = (
+        supabase.table("entries")
+        .select("*")
+        .gte("entry_date", start_date.isoformat())
+        .lte("entry_date", end_date.isoformat())
+        .execute()
+    )
 
-    summary = pd.DataFrame(rows, columns=["person", "total_entries", "completed_entries"])
+    rows = response.data
 
-    if summary.empty:
-        return summary
+    if not rows:
+        return pd.DataFrame()
 
-    summary["completed_entries"] = summary["completed_entries"].fillna(0).astype(int)
+    df = pd.DataFrame(rows)
+
+    summary = (
+        df.groupby("person")
+        .agg(
+            total_entries=("id", "count"),
+            completed_entries=("completed", "sum"),
+        )
+        .reset_index()
+    )
+
+    summary["completed_entries"] = summary["completed_entries"].astype(int)
     summary["remaining_entries"] = summary["total_entries"] - summary["completed_entries"]
     return summary
 
 
 def format_entry_title(entry):
     status = "Complete" if entry["completed"] else "To do"
-    return f'{entry["entry_time"]} | {entry["activity"]} | {entry["category"]} | {status}'
+    return f"{entry['entry_time']} | {entry['activity']} | {entry['category']} | {status}"
 
-
-create_table()
 
 st.set_page_config(page_title="Daily Tracker", page_icon="DT", layout="wide")
 
@@ -161,6 +122,7 @@ with st.form("add_entry_form", clear_on_submit=True):
         else:
             add_entry(person, entry_date, entry_time, activity, category, notes)
             st.success("Entry saved.")
+            st.rerun()
 
 st.divider()
 
