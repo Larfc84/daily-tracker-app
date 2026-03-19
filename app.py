@@ -17,6 +17,11 @@ CATEGORIES = [
     "Other",
 ]
 
+PHOTO_PATHS = {
+    "Laurence": "laurence.jpg",
+    "Isabel": "isabel.jpg",
+}
+
 
 @st.cache_resource
 def get_supabase():
@@ -103,6 +108,7 @@ st.title("Daily Activity Tracker")
 st.caption("A simple app for Laurence and Isabel to track what they do in a day.")
 
 selected_user = st.sidebar.selectbox("Choose a person", USERS)
+st.image(PHOTO_PATHS[selected_user], width=220)
 st.sidebar.write("Add a new entry, then mark it complete below.")
 
 st.sidebar.divider()
@@ -203,4 +209,3 @@ if is_parent_logged_in():
 
         chart_data = weekly_summary.set_index("person")[["completed_entries", "remaining_entries"]]
         st.bar_chart(chart_data)
-
