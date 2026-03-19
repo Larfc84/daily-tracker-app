@@ -1,4 +1,4 @@
-from datetime import date, timedelta, time
+from datetime import date, datetime, timedelta, time
 
 import pandas as pd
 import streamlit as st
@@ -36,6 +36,7 @@ def add_entry(person, entry_date, entry_time, activity, category, notes):
             "category": category,
             "notes": notes.strip(),
             "completed": False,
+            "created_at": datetime.utcnow().isoformat(),
         }
     ).execute()
 
@@ -92,6 +93,10 @@ def format_entry_title(entry):
     return f"{entry['entry_time']} | {entry['activity']} | {entry['category']} | {status}"
 
 
+def is_parent_logged_in():
+    return st.session_state.get("parent_logged_in", False)
+
+
 st.set_page_config(page_title="Daily Tracker", page_icon="DT", layout="wide")
 
 st.title("Daily Activity Tracker")
@@ -99,6 +104,23 @@ st.caption("A simple app for Laurence and Isabel to track what they do in a day.
 
 selected_user = st.sidebar.selectbox("Choose a person", USERS)
 st.sidebar.write("Add a new entry, then mark it complete below.")
+
+st.sidebar.divider()
+st.sidebar.subheader("Parent Login")
+
+password_input = st.sidebar.text_input("Parent password", type="password")
+
+if st.sidebar.button("Login"):
+    if password_input == st.secrets["PARENT_PASSWORD"]:
+        st.session_state["parent_logged_in"] = True
+        st.sidebar.success("Parent access enabled")
+    else:
+        st.sidebar.error("Wrong password")
+
+if is_parent_logged_in():
+    if st.sidebar.button("Logout"):
+        st.session_state["parent_logged_in"] = False
+        st.rerun()
 
 with st.form("add_entry_form", clear_on_submit=True):
     st.subheader("Add Entry")
@@ -150,33 +172,35 @@ else:
                     mark_entry_complete(entry["id"])
                     st.rerun()
 
-st.divider()
+if is_parent_logged_in():
+    st.divider()
 
-st.subheader("Weekly Summary")
-week_start = today - timedelta(days=today.weekday())
-week_end = week_start + timedelta(days=6)
+    st.subheader("Weekly Summary")
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
 
-st.write(
-    f"Showing entries from {week_start.strftime('%d %b %Y')} to {week_end.strftime('%d %b %Y')}."
-)
-
-weekly_summary = get_weekly_summary(week_start, week_end)
-
-if weekly_summary.empty:
-    st.info("No entries have been added this week.")
-else:
-    st.dataframe(
-        weekly_summary.rename(
-            columns={
-                "person": "Person",
-                "total_entries": "Total Entries",
-                "completed_entries": "Completed",
-                "remaining_entries": "Remaining",
-            }
-        ),
-        use_container_width=True,
-        hide_index=True,
+    st.write(
+        f"Showing entries from {week_start.strftime('%d %b %Y')} to {week_end.strftime('%d %b %Y')}."
     )
 
-    chart_data = weekly_summary.set_index("person")[["completed_entries", "remaining_entries"]]
-    st.bar_chart(chart_data)
+    weekly_summary = get_weekly_summary(week_start, week_end)
+
+    if weekly_summary.empty:
+        st.info("No entries have been added this week.")
+    else:
+        st.dataframe(
+            weekly_summary.rename(
+                columns={
+                    "person": "Person",
+                    "total_entries": "Total Entries",
+                    "completed_entries": "Completed",
+                    "remaining_entries": "Remaining",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        chart_data = weekly_summary.set_index("person")[["completed_entries", "remaining_entries"]]
+        st.bar_chart(chart_data)
+
